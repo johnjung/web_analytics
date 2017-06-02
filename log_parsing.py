@@ -4,31 +4,12 @@ import csv, re, sys, urlparse
 
 from optparse import OptionParser
 
-# to import files from this script:
-# open the file as a text file in Excel.
-# fields are separated by tabs.
-# there is no text separator.
-# import all fields as text. 
-
-# to use this script, pipe Apache log data into it:
-# example usage:
-# cat access_log | python log_parsing.py
-
-# TODO:
-
-# in the type_headings below there are some things that come through as browses. Emma would like these
-# to be recorded as "browse second click". 
-
+# NOTES:
 # looks like it's difficult to import tab-delimited data that contains UTF8 into Excel 2011 for Mac. 
 # https://rothmanshore.com/2013/10/29/solved-editing-a-csv-with-utf-8-encoding-on-a-mac/
 
-# VuFind                                                     server logs / Google Analytics
-# ArticlesPlus                                                             Google Analytics 
-# Database Finder (browses readable from URL, not searches.) server logs
-# EJournals (we have search terms- sfx.lib a-z)              server logs
-
-# get this to work with output from Google Analytics
-# get the logs for the database finder. can we get search info from this? 
+# TODO:
+# Add importing for ArticlesPlus, the Database Finder, and EJournals.
 
 ####################
 # GLOBAL VARIABLES #
