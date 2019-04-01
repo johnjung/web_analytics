@@ -1,3 +1,23 @@
+# ab_testing
+
+This is a placeholder for an AB testing script. For the time being it's just a
+place to save the function for a two-tailed Fisher's exact test. In the future
+I'd like to extend this by adding a web interface and other tests, like
+chi-squared, or maybe tests for numeric data as well. 
+
+The goal is to collect tests that deal with accepting support vs. rejecting 
+support, and choose appropriate sample sizes (i.e. to know when I can stop
+collecting data.)
+
+## Contributing
+
+Please contact the author with pull requests, bug reports, and feature
+requests.
+
+## Author
+
+John Jung
+
 # log_parsing
 
 A script to regularize Apache log file data and Google Analytics data for an

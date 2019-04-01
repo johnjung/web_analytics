@@ -1,0 +1,14 @@
+from scipy.stats import fisher_exact
+
+data = [[8, 2], [1, 5]]
+
+oddsration, pvalue = fisher_exact(data)
+
+print('odds ratio: {}'.format(oddsration))
+print('pvalue : {}'.format(pvalue))
+if pvalue < 0.01:
+  print('p < .01 (significant)')
+elif pvalue < 0.05:
+  print('p < .05 (significant)')
+else:
+  print('p > .05 (not significant)')
