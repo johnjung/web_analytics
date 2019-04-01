@@ -1,4 +1,9 @@
-# ab_testing
+# web_analytics
+
+This repository contains work-in-progress scripts for a/b testing and working
+with log files. 
+
+## ab_testing
 
 This is a placeholder for an AB testing script. For the time being it's just a
 place to save the function for a two-tailed Fisher's exact test. In the future
@@ -9,23 +14,14 @@ The goal is to collect tests that deal with accepting support vs. rejecting
 support, and choose appropriate sample sizes (i.e. to know when I can stop
 collecting data.)
 
-## Contributing
-
-Please contact the author with pull requests, bug reports, and feature
-requests.
-
-## Author
-
-John Jung
-
-# log_parsing
+## log_parsing
 
 A script to regularize Apache log file data and Google Analytics data for an
 instance of the VuFind library catalog software.
 
 v. 0.0.1
 
-## Parsing data with this script
+### Parsing data with this script
 
 Pipe either Google Analytics data or Apache log files into this script. It
 outputs a tab-delimited data file that can be imported into Microsoft Excel. 
@@ -48,12 +44,12 @@ cat access_log | log_parsing --apache --vufind > vufind_apache_output.txt
 cat access_log | log_parsing --google --vufind > vufind_google_output.txt
 ```
 
-## Getting data from Apache log files
+### Getting data from Apache log files
 
 Apache log files can be used as-is. You will need to copy them to your local
 drive to pipe them into the Python script though. 
 
-## Getting data from Google Analytics
+### Getting data from Google Analytics
 
 Go to Behavior > Site Content > All Pages. 
 Use the "Show rows" pulldown to show 5000 rows. 
@@ -71,7 +67,7 @@ Confirm that the top of the file looks something like this:
 Page,Pageviews,Unique Pageviews,Avg. Time on Page,Entrances,Bounce Rate,% Exit,Page Value
 ```
 
-## Importing data into Excel
+### Importing data into Excel
 
 Go to File > Open.
 Be sure "All Readable Documents" is selected in the Open dialog. 
