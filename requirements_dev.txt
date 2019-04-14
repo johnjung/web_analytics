@@ -1,0 +1,4 @@
+coverage
+pycodestyle
+pytest
+sphinx

@@ -2,14 +2,16 @@ from statistics import mean
 import numpy
 
 xs = numpy.array(range(0, 5), dtype=numpy.float64)
-ys = numpy.array([1264,971,1462,703,755], dtype=numpy.float64)
+ys = numpy.array([1264, 971, 1462, 703, 755], dtype=numpy.float64)
+
 
 def best_fit_slope_and_intercept(xs, ys):
-  m = (((mean(xs) * mean(ys)) - mean(xs * ys)) /
-       ((mean(xs) * mean(xs)) - mean(xs * xs)))
-  b = mean(ys) - m * mean(xs)
+    m = (((mean(xs) * mean(ys)) - mean(xs * ys)) /
+         ((mean(xs) * mean(xs)) - mean(xs * xs)))
+    b = mean(ys) - m * mean(xs)
 
-  return m, b
+    return m, b
+
 
 m, b = best_fit_slope_and_intercept(xs, ys)
 print('m')
