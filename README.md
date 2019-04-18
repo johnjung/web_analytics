@@ -5,14 +5,32 @@ with log files.
 
 ## ab_testing
 
-This is a placeholder for an AB testing script. For the time being it's just a
-place to save the function for a two-tailed Fisher's exact test. In the future
-I'd like to extend this by adding a web interface and other tests, like
-chi-squared, or maybe tests for numeric data as well. 
+This is a script for A/B testing. For the time being it's just a place to save
+the function for a two-tailed Fisher's exact test. In the future I'd like to
+extend this by adding a web interface and other tests like chi-squared.
 
-The goal is to collect tests that deal with accepting support vs. rejecting 
-support, and choose appropriate sample sizes (i.e. to know when I can stop
-collecting data.)
+Usage:
+
+```console
+$ cat sample_data/ab_testing.csv | ./ab_testing
+odds ratio: 20.0
+pvalue : 0.03496503496503495
+p < .05 (significant)
+```
+
+## line_of_best_fit
+
+This script calculates the line of best fit from a data series. It returns the
+slope intercept form of a line (y = mx + b)
+
+Usage:
+
+```console
+$ cat sample_data/line_of_best_fit.csv | ./line_of_best_fit 
+m = -128.60000000000002
+b = 1288.2
+y = 645.1999999999999
+```
 
 ## log_parsing
 

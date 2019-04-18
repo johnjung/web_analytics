@@ -1,9 +1,9 @@
+#!/usr/bin/env python
+
+import csv
+import sys
 from statistics import mean
 import numpy
-
-xs = numpy.array(range(0, 5), dtype=numpy.float64)
-ys = numpy.array([1264, 971, 1462, 703, 755], dtype=numpy.float64)
-
 
 def best_fit_slope_and_intercept(xs, ys):
     m = (((mean(xs) * mean(ys)) - mean(xs * ys)) /
@@ -11,14 +11,15 @@ def best_fit_slope_and_intercept(xs, ys):
     b = mean(ys) - m * mean(xs)
 
     return m, b
+    
+if __name__=='__main__':
+    reader = csv.reader(sys.stdin)
+    data = [int(i) for i in next(reader)]
 
-
-m, b = best_fit_slope_and_intercept(xs, ys)
-print('m')
-print(m)
-print('b')
-print(b)
-
-y = (m * 5) + b
-print('y')
-print(y)
+    ys = numpy.array(data, dtype=numpy.float64)
+    xs = numpy.array(range(0, len(data)), dtype=numpy.float64)
+    
+    
+    m, b = best_fit_slope_and_intercept(xs, ys)
+    y = (m * len(data)) + b
+    sys.stdout.write('m = {}\nb = {}\ny = {}\n'.format(m, b, y))
