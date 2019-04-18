@@ -1,4 +1,4 @@
-# web_analytics
+# Web Analytics
 
 This repository contains work-in-progress scripts for a/b testing and working
 with log files. 
