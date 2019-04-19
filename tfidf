@@ -1,0 +1,98 @@
+#!/usr/bin/env python
+"""Usage:
+    tfidf clean
+    tfidf (add <domain>)
+    tfidf (search <term>)
+"""
+
+import elasticsearch
+import re
+import requests
+
+from bs4 import BeautifulSoup, SoupStrainer
+from bs4.element import Comment
+from docopt import docopt
+
+class TFIDF:
+  def __init__(self, elasticsearch_server):
+    self.es = elasticsearch.Elasticsearch(elasticsearch_server)
+
+  def clean(self):
+    try:
+      self.es.indices.delete(index='tf_idf')
+    except elasticsearch.exceptions.NotFoundError:
+      pass
+
+  def add(self, domain):
+    r = requests.get(domain)
+    content = self.process_content(r.text)
+
+    urls = self.get_urls(r.text, domain)
+    print(urls)
+  
+  def search(self, term):
+    raise NotImplementedError
+
+  def process_content(self, html):
+    """Process html. Strip out unwanted tags and return only the parts of the
+       page we're interested in.
+    """
+    texts = filter(
+      lambda e: e.parent.name not in ['head', '[document]', 'meta', 'script', 'style', 'title'] and not isinstance(e, Comment),
+      BeautifulSoup(html, 'html.parser').findAll(text=True)
+    )
+    return re.sub("\s+", " ", u" ".join(texts)).strip()
+
+  def get_urls(self, html, domain):
+    """Get a list of the urls from a page.
+    """
+
+    # extract urls from the page.
+    urls = []
+    for link in BeautifulSoup(html, features='html.parser', parse_only=SoupStrainer('a')):
+      if link.has_attr('href'):
+        urls.append(link['href'])
+
+    # make sure urls either begin with '/' or contain the domain. 
+    urls = list(
+      filter(
+        lambda u: u.startswith('/') or domain in u,
+        urls
+      )
+    )
+
+    # remove the trailing slash from the domain, if present.
+    if domain.endswith('/'):
+      domain = domain[0:-1]
+
+    # remove the protocol (https, http), if present. 
+    if ':' in domain:
+      domain = domain.split(':')[1]
+
+    # add the domain to each url, if not present.
+    urls = list(
+      map(
+        lambda u: domain + u if not domain in u else u,
+        urls
+      )
+    )
+    return urls
+
+  def normalize_url(self, url):
+    """Normalize a url. Remove 'index.html', 'index.php', etc.
+    """
+    raise NotImplementedError
+ 
+
+if __name__=='__main__':
+  args = docopt(__doc__, version='0.0.1')
+
+  tfidf = TFIDF('tf_idf_elastic_1:9200')
+
+  if args['clean']:
+    tfidf.clean()
+  elif args['add']:
+    tfidf.add(args['<domain>'])
+  elif args['search']:
+    tfidf.search(args['<term>'])
+  

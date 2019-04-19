@@ -32,6 +32,20 @@ b = 1288.2
 y = 645.1999999999999
 ```
 
+## tfidf
+
+This is a work-in-progress for testing how changes to content on individual
+web pages might affect their results in search. Note: this script requires
+a running Elasticsearch instance. 
+
+Usage:
+
+```console
+$ tfidf clean
+$ tfidf add sample.org
+$ tfidf search widgets
+```
+
 ## log_parsing
 
 A script to regularize Apache log file data and Google Analytics data for an

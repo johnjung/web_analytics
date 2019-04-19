@@ -19,6 +19,7 @@ setup(
     scripts=[
         'web_analytics/ab_testing',
         'web_analytics/line_of_best_fit',
-        'web_analytics/log_parsing'
+        'web_analytics/log_parsing',
+        'web_analytics/tfidf'
     ]
 )
