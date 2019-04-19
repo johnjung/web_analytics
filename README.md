@@ -33,10 +33,8 @@ y = 645.1999999999999
 ```
 
 ## tfidf
-
-This is a work-in-progress for testing how changes to content on individual
-web pages might affect their results in search. Note: this script requires
-a running Elasticsearch instance. 
+ 
+A work-in-progress script to test website content changes quickly. This program loads the content from a given list of websites into a database. It then allows you to run test searches against that database, so you can get a sense of how content changes might affect how it appears in search results. 
 
 Usage:
 
