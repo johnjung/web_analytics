@@ -49,8 +49,6 @@ $ tfidf search widgets
 A script to regularize Apache log file data and Google Analytics data for an
 instance of the VuFind library catalog software.
 
-v. 0.0.1
-
 ### Parsing data with this script
 
 Pipe either Google Analytics data or Apache log files into this script. It
