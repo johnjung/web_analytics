@@ -1,0 +1,469 @@
+#!usr/bin/env python
+"""Usage:
+   leads add <file>
+   leads check_json_columns <file>
+   leads check_pdf_filename <file>
+   leads create_database
+   leads retrieve <YYYY-mm>
+"""
+
+import datetime
+import json
+import PyPDF2
+import re
+import sqlite3
+import sys
+import tabula
+from docopt import docopt
+
+
+def find_str_in_str(s1, s2, reverse=False):
+    """Check to see if a string is embedded in another string: 
+    e.g., the word "Hello" is embedded in "Wisconsin" in
+    "WHeliscloonsin". Returns "Wisconsin" if the embedded string
+    is present, or '' otherwise."""
+    l1 = list(s1)
+    if reverse:
+        l1.reverse()
+    l2 = list(s2)
+    if reverse:
+        l2.reverse()
+    for i in range(len(l1)):
+        try:
+            if l1[i] == l2[0]:
+                l1[i] = None
+                l2 = l2[1:]
+        except IndexError:
+            break
+    l1 = [c for c in l1 if not c == None]
+    if bool(l2):
+        return ''
+    else:
+        if reverse:
+            l1.reverse()
+        return ''.join(l1)
+
+
+def find_list_in_str(s1, str_list, reverse=False):
+    """Starting from the beginning of s1, search for all of the letters in each
+    string in str_list. Return all matches."""
+    found_strings = []
+    for s2 in str_list:
+        if find_str_in_str(s1, s2, reverse):
+            found_strings.append(s2)
+    return found_strings
+
+
+def remove_embedded_string_from_end(s1, s2):
+    """Remove string 2 from string 1. String 2 may be embedded into the end of
+       string one, e.g. "Wyman & Comp5a/n2y8/2019", "Iversen's Bake5ry/28/2019"
+    """
+    l1 = list(s1)
+    l2 = list(s2) 
+
+    while True:
+        try:
+            c = l2.pop()
+        except IndexError:
+            break
+        for i in reversed(range(len(l1))):
+            if l1[i] == c:
+                del l1[i]
+    if l2:
+        raise ValueError
+    else:
+        return ''.join(l1)
+
+
+def get_date_str_from_str(str):
+    # a date may be embedded into the end of this string, and 
+    # it may be 'scrambled' in, like "Wyman & Comp5a/n2y8/2019".
+    potential_date = re.sub('[^/0-9]', '', str)
+
+    potential_dates = []
+    i = len(potential_date) - 1
+    while i >= 0:
+        try:
+            datetime.datetime.strptime(potential_date[i:], '%m/%d/%Y')
+            if potential_date[i:][0] != '0':
+                potential_dates.append(potential_date[i:])
+        except ValueError:
+            pass
+        i -= 1
+
+    if len(potential_dates) == 0:
+        return ''
+    elif len(potential_dates) == 1:
+        return potential_dates[0]
+    else:
+        print(potential_dates)
+        raise ValueError
+
+
+def convert_datestring_to_timestamp(s):
+    return datetime.datetime.strptime(s, '%m/%d/%Y').strftime('%Y-%m-%d')
+
+
+def create_database(conn):
+    try:
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS leads (
+                     id integer PRIMARY KEY,
+                     prospect varchar,
+                     appt_date date,
+                     market varchar,
+                     result varchar,
+                     set_date date,
+                     setter varchar,
+                     confirmer varchar,
+                     cnf_date date,
+                     source_sub varchar,
+                     job_type varchar,
+                     product varchar,
+                     sales_rep_1 varchar,
+                     sales_rep_2 varchar,
+                     gsa price);''')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def add(conn, filename):
+    c = conn.cursor()
+    for v in get_data(filename):
+        conn.cursor().execute(
+	    'INSERT INTO leads VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+            v
+        )
+    conn.commit()
+
+
+def retrieve(conn, month):
+    c = conn.cursor()
+    c.execute("SELECT * FROM leads WHERE set_date BETWEEN '{month}-01' AND '{month}-31';".format(month=month))
+    return c.fetchall()
+
+
+def get_pdf_num_pages(filename):
+    return PyPDF2.PdfFileReader(open(filename, 'rb')).getNumPages()
+
+
+def check_pdf_filename(filename):
+    """Be sure the filename contains the correct date.
+
+    Notes:
+    Filename should match YYYYMMDD.pdf. This function opens each file and
+    checks to see if the Set Dates and the name of the file match. 
+    """
+
+    for p in range(1, get_pdf_num_pages(filename) + 1):
+        data = tabula.read_pdf(filename, pages=p, output_format='json')
+        # the data should be a list of one element.
+        assert len(data) == 1
+
+        for data_list in data[0]['data']:
+            for data_chunk in data_list:
+                print(data_chunk['text'])
+        continue
+
+        records = df.to_records()
+        i = 0
+        while i < len(records):
+            print(records[i])
+            i -= 1
+
+def check_json_columns(filename):
+    """Be sure the 'left' attribute of each data chunk is one of the following
+    values:
+
+    0.0    (nothing)
+    15.0   ID Prospect Appt Date
+    117.5  Appt Date (can be smooshed into previous column)
+    166.0  Market
+    208.56 Result
+    254.0  Set Date
+    302.28 Setter/Confirmer
+    309.96 (number of appointments for...)
+    400.0  Cnf Date
+    453    SourveSub/Job Type Product
+    621.72 Sales Rep(s)
+    753.0  GSA
+    """
+    min(myList, key=lambda x:abs(x-myNumber))
+    for p in range(1, get_pdf_num_pages(filename) + 1):
+        data = tabula.read_pdf(filename, pages=p, output_format='json')
+        assert len(data) == 1
+
+        for data_list in data[0]['data']:
+            for data_chunk in data_list:
+                if not data_chunk['left'] in (0.0, 15.0, 165.72, 208.56,
+                    255.72, 302.28, 401.16, 456.0, 621.72, 751.44):
+                    print(data_chunk)
+
+
+def skip_row(data_list):
+    """Check to see if this is a row that contains things like headers.
+    make sure that this 'left' is the closest one to 15. 
+    """
+    if data_list[0]['text'].startswith('ID '):
+        return True
+    elif data_list[0]['text'].startswith('Total # Appointments for :'):
+        return True
+    else:
+        return False
+
+
+def get_id(data_list):
+    """Probably close to left 15.0
+    It's the sequence of numbers at the beginning.
+    """
+    return data_list[0]['text'].split(' ')[0]
+
+
+def get_prospect(data_list):
+    # first get everything after the first space.
+    str = ' '.join(data_list[0]['text'].split(' ')[1:]).strip()
+
+    # a date may be embedded into the end of this string, and 
+    # it may be 'scrambled' in, like "Wyman & Comp5a/n2y8/2019".
+    potential_date = get_date_str_from_str(data_list[0]['text'])
+    if potential_date:
+        potential_prospect = remove_embedded_string_from_end(str, potential_date).strip()
+    else:
+        potential_prospect = str
+
+    if data_list[1]['text'] in ('IL', 'IN'):
+        return potential_prospect
+    elif data_list[2]['text'] in ('IL', 'IN'):
+        return potential_prospect
+    else:
+        str = remove_embedded_string_from_end(
+            potential_prospect,
+            'IL'
+        ).strip()
+        if str != potential_prospect:
+            return str
+        str = remove_embedded_string_from_end(
+            potential_prospect,
+            'IN'
+        ).strip()
+        if str != potential_prospect:
+            return str
+        else:
+            return potential_prospect
+
+
+def get_appt_date(data_list):
+    potential_date = get_date_str_from_str(data_list[0]['text'])
+    if potential_date:
+        return potential_date
+    else:
+        return data_list[1]['text']
+
+
+def get_market(data_list):
+    if data_list[1]['text'] in ('IL', 'IN'):
+        return data_list[1]['text']
+    elif data_list[2]['text'] in ('IL', 'IN'):
+        return data_list[2]['text']
+    elif remove_embedded_string_from_end(
+        data_list[0]['text'],
+        'IL'
+    ) != data_list[0]['text']:
+        return 'IL'
+    elif remove_embedded_string_from_end(
+        data_list[0]['text'],
+        'IN'
+    ) != data_list[0]['text']:
+            return 'IN'
+    else:
+        raise ValueError
+
+
+def get_result(data_list):
+    if not data_list[2]['text'] in ('IL', 'IN'):
+        return data_list[2]['text']
+    else:
+        potential_date = get_date_str_from_str(data_list[4]['text'])
+        if potential_date:
+            return remove_embedded_string_from_end(
+                data_list[4]['text'],
+                potential_date
+            )
+        else:
+            return data_list[4]['text']
+
+
+def get_set_date(data_list):
+    try:
+        datetime.datetime.strptime(data_list[4]['text'], '%m/%d/%Y')
+        return data_list[4]['text']
+    except ValueError:
+        potential_date = get_date_str_from_str(data_list[4]['text'])
+        if potential_date:
+            return potential_date
+        else:
+            raise ValueError
+
+
+def get_setter(data_list):
+    if data_list[5]['text']:
+        return data_list[5]['text']
+    else:
+        return data_list[6]['text']
+
+
+def get_confirmer(data_list):
+    if data_list[5]['text']:
+        return data_list[5]['text']
+    else:
+        return data_list[6]['text']
+
+
+def get_cnf_date(data_list):
+    try:
+        datetime.datetime.strptime(data_list[6]['text'], '%m/%d/%Y')
+        return data_list[6]['text']
+    except ValueError:
+        pass
+    datetime.datetime.strptime(data_list[7]['text'], '%m/%d/%Y')
+    return data_list[7]['text']
+
+
+def get_source_sub(data_list):
+    try:
+        datetime.datetime.strptime(data_list[7]['text'], '%m/%d/%Y')
+        str = data_list[8]['text']
+    except ValueError:
+        str = data_list[7]['text']
+    source_subs = ('Customer Referral', 'Existing Non Storage Customer',
+                   'Other', 'Our Website', 'Search Engines',
+                   'Self Generated Appt', 'Walk in South Holland')
+    for s in source_subs:
+        if str.startswith(s):
+            return s
+    str_list = find_list_in_str(str, source_subs)
+    if len(str_list) == 1:
+        return str_list[0]
+    elif len(str_list) > 1:
+        return str
+    else:
+        return ''
+
+
+def get_job_type(data_list):
+    return ''.join((data_list[7]['text'], data_list[8]['text']))
+
+
+def get_product(data_list):
+    try:
+        datetime.datetime.strptime(data_list[7]['text'], '%m/%d/%Y')
+        str = data_list[8]['text']
+    except ValueError:
+        str = data_list[7]['text']
+    products = ('New Comp', 'New Recovr', 'Other', 'Retractabl')
+    for p in products:
+        if str.endswith(p):
+            return p
+    str_list = find_list_in_str(str, products)
+    if len(str_list) == 1:
+        return str_list[0]
+    else:
+        return ''
+ 
+
+def get_sales_reps(data_list):
+    try:
+        if data_list[9]['text'][0] != '$':
+            return data_list[9]['text']
+    except IndexError:
+        pass
+    try:
+        if data_list[10]['text'][0] != '$':
+            return data_list[10]['text']
+    except IndexError:
+        pass
+    return ''
+
+
+def get_gsa(data_list):
+    try:
+        if data_list[9]['text'][0] == '$':
+            return data_list[9]['text']
+    except IndexError:
+        pass
+    try:
+        if data_list[10]['text'][0] == '$':
+            return data_list[10]['text']
+    except IndexError:
+        pass
+    return ''
+
+
+def get_data(filename):
+    output = []
+
+    for p in range(1, get_pdf_num_pages(filename) + 1):
+        data = tabula.read_pdf(filename, pages=p, output_format='json')
+        assert len(data) == 1
+
+        d = 0
+        while d < len(data[0]['data']):
+            while skip_row(data[0]['data'][d]):
+                d += 1
+                if d >= len(data[0]['data']):
+                    break
+
+            id = get_id(data[0]['data'][d])
+            prospect = get_prospect(data[0]['data'][d])
+            appt_date = convert_datestring_to_timestamp(get_appt_date(data[0]['data'][d]))
+            market = get_market(data[0]['data'][d])
+            result = get_result(data[0]['data'][d])
+            set_date = convert_datestring_to_timestamp(get_set_date(data[0]['data'][d]))
+            setter = get_setter(data[0]['data'][d])
+            try:
+                confirmer = get_confirmer(data[0]['data'][d+1])
+            except IndexError:
+                confirmer = ''
+            cnf_date = convert_datestring_to_timestamp(get_cnf_date(data[0]['data'][d]))
+            source_sub = get_source_sub(data[0]['data'][d])
+            try:
+                job_type = get_job_type(data[0]['data'][d+1])
+            except IndexError:
+                job_type = ''
+            product = get_product(data[0]['data'][d])
+            sales_rep_1 = get_sales_reps(data[0]['data'][d])
+            try:
+                sales_rep_2 = get_sales_reps(data[0]['data'][d+1])
+            except IndexError:
+                sales_rep_2 = ''
+            gsa = get_gsa(data[0]['data'][d])
+
+            output.append((id, prospect, appt_date, market, result,
+                           set_date, setter, confirmer, cnf_date, source_sub,
+                           job_type, product, sales_rep_1, sales_rep_2, gsa))
+            d += 2
+    return output
+
+
+def main():
+    arguments = docopt(__doc__)
+
+    conn = sqlite3.connect('leads.db')
+    if arguments['add']:
+        add(conn, arguments['<file>'])
+    elif arguments['check_json_columns']:
+        check_json_columns(arguments['<file>'])
+    elif arguments['check_pdf_filename']:
+        check_pdf_filename(arguments['<file>'])
+    elif arguments['create_database']: 
+        create_database(conn)
+    elif arguments['retrieve']:
+        records = retrieve(conn, arguments['<YYYY-mm>'])
+        for r in records:
+            print(r)
+    conn.close()
+
+
+if __name__=='__main__':
+    main()
