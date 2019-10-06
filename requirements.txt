@@ -2,6 +2,10 @@ beautifulsoup4
 docopt
 elasticsearch>=6.0.0,<7.0.0
 nltk
+openpyxl
+PyPDF2
 requests
 scipy
+tabula
 textblob
+xlrd
