@@ -4,17 +4,12 @@
     lead_report <database_name> --add-from-xls -
     lead_report <database_name> <identifier> --add-geographic-data
     lead_report <database_name> <identifier> --validate-address
-
     lead_report <database_name> --report <start_yyyymmdd> <end_yyyymmdd> (--xlsx|--tab-delimited)
+    lead_report <database_name> --get-identifiers-with-missing-county
+    lead_report <database_name> --get-identifiers-with-missing-latitude-longitude
+    lead_report <database_name> --get-identifiers-with-missing-validated-addresses
 
 """
-
-# https://github.com/johnjung/web_analytics/blob/master/web_analytics/leads
-# the web_analytics repo contains a script called "leads". It's got some work
-# on an sqlite database started. Combine these scripts into one. 
-
-# Look at existing data. Are all fields in a record unique? (can be used as
-# primary key?)
 
 # This data includes repeat visits, not just initial leads. I need to figure out
 # how to report on initial lead data only.
@@ -48,6 +43,7 @@ def create_database(conn):
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS lead_report (
                      id integer PRIMARY KEY,
+                     lead_perfection_id integer,
                      market varchar,
                      prospect varchar,
                      appt_date date,
@@ -63,7 +59,8 @@ def create_database(conn):
                      sales_rep_2 varchar,
                      address varchar, 
                      city_state_zip varchar,
-                     validated_address varchar,
+                     validated_address1 varchar,
+                     validated_address2 varchar,
                      validated_city varchar,
                      validated_state varchar,
                      validated_zip varchar,
@@ -81,12 +78,113 @@ def add_record(conn, record):
         record: a dict containing fields to add to our database.
     """
     c = conn.cursor()
-    for v in get_data(filename):
-        conn.cursor().execute(
-	    'INSERT INTO lead_report VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
-            v
+
+    # check to see if the original lead perfection fields already exist in the
+    # database. only add this record if those fields do not already exist. 
+    c = conn.cursor().execute(
+        '''SELECT count(*)
+           FROM lead_report 
+           WHERE lead_perfection_id=?
+             and market=?
+             and prospect=?
+             and appt_date=?
+             and result=?
+             and set_date=?
+             and setter=?
+             and confirmer=?
+             and cnf_date=?
+             and source_sub=?
+             and job_type=?
+             and product=?
+             and sales_rep_1=?
+             and sales_rep_2=?
+             and address=?
+             and city_state_zip=?''',
+        (
+             record['lead_perfection_id'],
+             record['market'],
+             record['prospect'],
+             record['appt_date'],
+             record['result'],
+             record['set_date'],
+             record['setter'],
+             record['confirmer'],
+             record['cnf_date'],
+             record['source_sub'],
+             record['job_type'],
+             record['product'],
+             record['sales_rep_1'],
+             record['sales_rep_2'],
+             record['address'],
+             record['city_state_zip']
         )
-    conn.commit()
+    )
+    result = c.fetchone()
+    if result[0] == 0:
+        conn.cursor().execute(
+	        'INSERT INTO lead_report VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+            (
+                 None,
+                 record['lead_perfection_id'],
+                 record['market'],
+                 record['prospect'],
+                 record['appt_date'],
+                 record['result'],
+                 record['set_date'],
+                 record['setter'],
+                 record['confirmer'],
+                 record['cnf_date'],
+                 record['source_sub'],
+                 record['job_type'],
+                 record['product'],
+                 record['sales_rep_1'],
+                 record['sales_rep_2'],
+                 record['address'],
+                 record['city_state_zip'],
+                 None,
+                 None,
+                 None,
+                 None,
+                 None,
+                 None,
+                 None,
+                 None
+            )
+        )
+        conn.commit()
+
+def get_identifiers_for_missing_county(conn):
+    c = conn.cursor().execute(
+        'SELECT id FROM lead_report WHERE county IS NULL;',
+        ()
+    )
+    results = []
+    for record in c.fetchall():
+        results.append(record[0])
+    return results
+
+def get_identifiers_for_missing_latitude_longitude(conn):
+    c = conn.cursor().execute(
+        'SELECT id FROM lead_report WHERE latitude IS NULL AND longitude IS NULL;',
+        ()
+    )
+    results = []
+    for record in c.fetchall():
+        results.append(record[0])
+    return results
+
+def get_identifiers_for_missing_validated_address(conn):
+    c = conn.cursor().execute(
+        'SELECT id FROM lead_report WHERE validated_address1 IS NULL AND validated_address2 IS NULL;',
+        ()
+    )
+    results = []
+    for record in c.fetchall():
+        results.append(record[0])
+    return results
+    
+def get_identifiers_for_missing_validated_addresses(conn):
+    raise NotImplementedError
 
 def get_records_from_xls(workbook):
     """Get records from a .xls file."""
@@ -99,6 +197,9 @@ def get_records_from_xls(workbook):
             return datetime.datetime(
                 *xlrd.xldate_as_tuple(cell_value, workbook.datemode)
             )
+
+    def get_str(cell_value):
+        return str(cell_value).strip()
 
     sheet = workbook.sheet_by_index(0)
 
@@ -115,22 +216,22 @@ def get_records_from_xls(workbook):
 
         record = {}
         for field, rec in {
-            'leadperfection_id': { 'r_offset': 0, 'c': 0,  'cell_type': xlrd.XL_CELL_NUMBER },
-            'market':            { 'r_offset': 1, 'c': 0,  'cell_type': xlrd.XL_CELL_TEXT   },
-            'prospect':          { 'r_offset': 0, 'c': 1,  'cell_type': xlrd.XL_CELL_TEXT   },
-            'appt_date':         { 'r_offset': 0, 'c': 2,  'cell_type': xlrd.XL_CELL_DATE   },
-            'result':            { 'r_offset': 0, 'c': 5,  'cell_type': xlrd.XL_CELL_TEXT   },
-            'set_date':          { 'r_offset': 0, 'c': 7,  'cell_type': xlrd.XL_CELL_DATE   },
-            'setter':            { 'r_offset': 0, 'c': 9,  'cell_type': xlrd.XL_CELL_TEXT   },
-            'confirmer':         { 'r_offset': 1, 'c': 9,  'cell_type': xlrd.XL_CELL_TEXT   },
-            'cnf_date':          { 'r_offset': 0, 'c': 13, 'cell_type': xlrd.XL_CELL_DATE   },
-            'source_sub':        { 'r_offset': 0, 'c': 15, 'cell_type': xlrd.XL_CELL_TEXT   },
-            'job_type':          { 'r_offset': 1, 'c': 15, 'cell_type': xlrd.XL_CELL_TEXT   },
-            'product':           { 'r_offset': 0, 'c': 19, 'cell_type': xlrd.XL_CELL_TEXT   },
-            'sales_rep_1':       { 'r_offset': 0, 'c': 20, 'cell_type': xlrd.XL_CELL_TEXT   },
-            'sales_rep_2':       { 'r_offset': 1, 'c': 20, 'cell_type': xlrd.XL_CELL_TEXT   },
-            'address_line_1':    { 'r_offset': 0, 'c': 23, 'cell_type': xlrd.XL_CELL_TEXT   },
-            'address_line_2':    { 'r_offset': 1, 'c': 23, 'cell_type': xlrd.XL_CELL_TEXT   }
+            'lead_perfection_id': { 'r_offset': 0, 'c': 0,  'cell_type': xlrd.XL_CELL_NUMBER },
+            'market':             { 'r_offset': 1, 'c': 0,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'prospect':           { 'r_offset': 0, 'c': 1,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'appt_date':          { 'r_offset': 0, 'c': 2,  'cell_type': xlrd.XL_CELL_DATE   },
+            'result':             { 'r_offset': 0, 'c': 5,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'set_date':           { 'r_offset': 0, 'c': 7,  'cell_type': xlrd.XL_CELL_DATE   },
+            'setter':             { 'r_offset': 0, 'c': 9,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'confirmer':          { 'r_offset': 1, 'c': 9,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'cnf_date':           { 'r_offset': 0, 'c': 13, 'cell_type': xlrd.XL_CELL_DATE   },
+            'source_sub':         { 'r_offset': 0, 'c': 15, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'job_type':           { 'r_offset': 1, 'c': 15, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'product':            { 'r_offset': 0, 'c': 19, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'sales_rep_1':        { 'r_offset': 0, 'c': 20, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'sales_rep_2':        { 'r_offset': 1, 'c': 20, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'address':            { 'r_offset': 0, 'c': 23, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'city_state_zip':     { 'r_offset': 1, 'c': 23, 'cell_type': xlrd.XL_CELL_TEXT   }
         }.items():
             assert sheet.cell_type(r + rec['r_offset'], rec['c']) in (rec['cell_type'], xlrd.XL_CELL_EMPTY)
             if rec['cell_type'] == xlrd.XL_CELL_DATE:
@@ -138,7 +239,7 @@ def get_records_from_xls(workbook):
             elif rec['cell_type'] == xlrd.XL_CELL_NUMBER:
                 fun = int
             elif rec['cell_type'] == xlrd.XL_CELL_TEXT:
-                fun = str
+                fun = get_str
             record[field] = fun(sheet.cell_value(r + rec['r_offset'], rec['c']))
         records.append(record)
         r += 2
@@ -292,49 +393,24 @@ def create_workbook(records):
 
 if __name__=='__main__':
     options = docopt(__doc__)
-    if options['--add-from-csv']:
-        # be sure that the function to add data doesn't add duplicate entries in the system.
-        raise NotImplementedError
+    conn = sqlite3.connect(options['<database_name>'])
 
-    elif options['--add-geo']:
-        records = get_records_from_csv(options['<input_csv_filename>'])
-
-        r = 0
-        while r < len(records):
-            records[r].update(
-                get_geo_data(records[r]['address_line_1'] + ' ' + records[r]['address_line_2'])
-            )
-            r += 1
-
-        writer = csv.writer(sys.stdout)
-        for r in records:
-            writer.writerow([
-                r['leadperfection_id'],
-                r['market'],
-                r['prospect'],
-                str(r['appt_date']).split(' ')[0],
-                r['result'],
-                str(r['set_date']).split(' ')[0],
-                r['setter'],
-                r['confirmer'],
-                str(r['cnf_date']).split(' ')[0],
-                r['source_sub'],
-                r['job_type'],
-                r['product'],
-                r['sales_rep_1'],
-                r['sales_rep_2'],
-                r['address_line_1'],
-                r['address_line_2'],
-                r['normalized_county'],
-                r['normalized_state'],
-                r['normalized_postalCode'],
-                r['lat'],
-                r['lng']
-            ])
-    elif options['--convert-to-csv']:
-        records = get_records_from_xlsx(
-            openpyxl.load_workbook(options['<input_xlsx_filename>'])
+    if options['--add-from-xls']:
+        workbook = xlrd.open_workbook(
+            file_contents=sys.stdin.buffer.read(),
+            logfile=open(os.devnull, 'w')
         )
+        records = get_records_from_xls(workbook)
+        for record in records:
+            add_record(conn, record)
+        sys.exit()
+
+    elif options['--create-database']:
+        create_database(conn)
+        sys.exit()
+
+    elif options['--report']:
+        raise NotImplementedError
 
         writer = csv.writer(sys.stdout)
         for r in records:
@@ -357,163 +433,18 @@ if __name__=='__main__':
                 r['address_line_2']
             ])
         sys.exit()
-    elif options['--convert-to-xlsx']:
-        create_workbook(
-            get_records(
-                xlrd.open_workbook(
-                    options['<input_xls_filename>'],
-                    logfile=sys.stderr
-                )
-            )
-        ).save(options['<output_xlsx_filename>'])
-        sys.exit()
-    elif options['--county-report']:
-        with open(options['<csv_filename>']) as f:
-            for row in csv.reader(f):
-                print('{} County, {}'.format(row[16], row[17]))
 
-    '''
-    create_workbook(
-        get_records(
-            xlrd.open_workbook(
-                options['<input_xls_filename>'],
-                logfile=sys.stderr
-            )
-        )
-    ).save(options['<output_xlsx_filename>'])
-    '''
+    elif options['--get-identifiers-with-missing-county']:
+        for identifier in get_identifiers_for_missing_county(conn):
+            sys.stdout.write('{}\n'.format(str(identifier)))
+        sys.exit() 
 
-"""
-def retrieve(conn, month):
-    c = conn.cursor()
-    c.execute("SELECT * FROM leads WHERE set_date BETWEEN '{month}-01' AND '{month}-31';".format(month=month))
-    return c.fetchall()
+    elif options['--get-identifier-with-missing-latitude-longitude']:
+        for identifier in get_identifiers_for_missing_latitude_longitude(conn):
+            sys.stdout.write('{}\n'.format(str(identifier)))
+        sys.exit() 
 
-def get_records_from_csv(csv_filename):
-    '''This should be able to import either plain CSV data or CSV data with
-       geographic info in the rightmost columns.'''
-    records = []
-    with open(csv_filename) as f:
-        for row in csv.reader(f):
-            record = {
-                'leadperfection_id': row[0],
-                'market':            row[1],
-                'prospect':          row[2],
-                'appt_date':         row[3],
-                'result':            row[4],
-                'set_date':          row[5],
-                'setter':            row[6],
-                'confirmer':         row[7],
-                'cnf_date':          row[8],
-                'source_sub':        row[9],
-                'job_type':          row[10],
-                'product':           row[11],
-                'sales_rep_1':       row[12],
-                'sales_rep_2':       row[13],
-                'address_line_1':    row[14],
-                'address_line_2':    row[15]
-            }
-            if len(row) > 16:
-                record.update({
-                    'normalized_street_address': row[16],
-                    'normalized_city':           row[17],
-                    'normalized_state':          row[18],
-                    'normalized_postalCode':     row[19],
-                    'normalized_county':         row[20],
-                    'lat':                       row[21],
-                    'lng':                       row[22]
-                })
-            records.append(record)
-    return records
-
-def get_records_from_xlsx(workbook):
-    """Get records from an openpyxl workbook."""
-
-    def get_datetime(cell_value):
-        """Requires access to the workbook variable."""
-        if cell_value == '':
-            return None
-        else:
-            return datetime.datetime(
-                cell_value
-            )
-
-    sheet = workbook.active
-
-    max_cell = sheet.dimensions.split(':')[1]
-    max_row = int(''.join([i for i in max_cell if i.isnumeric()]))
-
-    records = []
-    r = 12
-    while r <= max_row:
-        try:
-            while type(sheet.cell(row=r, column=1).value) != int:
-                assert r <= max_row
-                r += 1
-        except (AssertionError, IndexError):
-            break
-
-        record = {}
-        for field, rec in {
-            'leadperfection_id': { 'r_offset': 0, 'c': 1,  'cell_type': 'int'  },
-            'market':            { 'r_offset': 1, 'c': 1,  'cell_type': 'str'  },
-            'prospect':          { 'r_offset': 0, 'c': 2,  'cell_type': 'str'  },
-            'appt_date':         { 'r_offset': 0, 'c': 3,  'cell_type': 'date' },
-            'result':            { 'r_offset': 0, 'c': 6,  'cell_type': 'str'  },
-            'set_date':          { 'r_offset': 0, 'c': 8,  'cell_type': 'date' },
-            'setter':            { 'r_offset': 0, 'c': 10,  'cell_type': 'str' },
-            'confirmer':         { 'r_offset': 1, 'c': 10,  'cell_type': 'str' },
-            'cnf_date':          { 'r_offset': 0, 'c': 14, 'cell_type': 'date' },
-            'source_sub':        { 'r_offset': 0, 'c': 16, 'cell_type': 'str'  },
-            'job_type':          { 'r_offset': 1, 'c': 16, 'cell_type': 'str'  },
-            'product':           { 'r_offset': 0, 'c': 20, 'cell_type': 'str'  },
-            'sales_rep_1':       { 'r_offset': 0, 'c': 21, 'cell_type': 'str'  },
-            'sales_rep_2':       { 'r_offset': 1, 'c': 21, 'cell_type': 'str'  },
-            'address_line_1':    { 'r_offset': 0, 'c': 24, 'cell_type': 'str'  },
-            'address_line_2':    { 'r_offset': 1, 'c': 24, 'cell_type': 'str'  }
-        }.items():
-            if rec['cell_type'] == 'date':
-                record[field] = sheet.cell(row = r + rec['r_offset'], column = rec['c']).value
-            elif rec['cell_type'] == 'int':
-                record[field] = int(sheet.cell(row = r + rec['r_offset'], column = rec['c']).value)
-            elif rec['cell_type'] == 'str':
-                record[field] = str(sheet.cell(row = r + rec['r_offset'], column = rec['c']).value)
-        records.append(record)
-        r += 2
-
-    return records
-
-def get_year_month(records):
-    """ Get the year and month from these records."""
-
-    dates = sorted(
-        [r['cnf_date'] for r in records if r['cnf_date'] is not None]
-    )
-    d = dates[int(len(dates) / 2)]
-    return (d.year, d.month)
-
-def get_lat_lng(address):
-    data = json.loads(
-        urllib.request.urlopen(
-            'http://open.mapquestapi.com/geocoding/v1/address?key={}&location={}'.format(
-                MAPQUEST_API_KEY,
-                urllib.parse.quote(address)
-            )
-        ).read()
-    )
-
-    for result in data['results']:
-        for location in result['locations']:
-            if location['adminArea3'] == '':
-                continue
-            return (
-                location['adminArea3'],
-                location['adminArea3Type'],
-                location['adminArea4'],
-                location['adminArea4Type'],
-                location['latLng']
-            )
-    return None
-
-
-"""
+    elif options['--get-identifiers-with-missing-validated-addresses']:
+        for identifier in get_identifiers_for_missing_validated_address(conn):
+            sys.stdout.write('{}\n'.format(str(identifier)))
+        sys.exit() 
