@@ -1,0 +1,519 @@
+#!/usr/bin/env python
+"""Usage:
+    lead_report --create-database <database_name>
+    lead_report <database_name> --add-from-xls -
+    lead_report <database_name> <identifier> --add-geographic-data
+    lead_report <database_name> <identifier> --validate-address
+
+    lead_report <database_name> --report <start_yyyymmdd> <end_yyyymmdd> (--xlsx|--tab-delimited)
+
+"""
+
+# https://github.com/johnjung/web_analytics/blob/master/web_analytics/leads
+# the web_analytics repo contains a script called "leads". It's got some work
+# on an sqlite database started. Combine these scripts into one. 
+
+# Look at existing data. Are all fields in a record unique? (can be used as
+# primary key?)
+
+# This data includes repeat visits, not just initial leads. I need to figure out
+# how to report on initial lead data only.
+
+# workflow should be to try address as entered first, and only request data
+# from USPS if the geocoding lookup failed. 
+
+# is there a good command line way to do this?
+#    see which entries are without a county, latitude, or longitude.
+#    see which entries have no validated address.
+
+# adding county, latitude, longitude info 
+# should work from the validated address, if present, and the non-validated address if not. 
+
+# should be able to restrict output to initial leads only, since the system
+# includes things that are not just initial leads.
+
+import csv, datetime, json, openpyxl, os, re, sqlite3, sys, time, urllib.error, urllib.parse, urllib.request, xlrd
+import xml.etree.ElementTree as ElementTree
+from docopt import docopt
+from geopy.geocoders import Nominatim
+
+def create_database(conn):
+    """Create initial sqlite database table to store lead info.
+
+    Args:
+        conn: an sqlite database connection.
+    """
+
+    try:
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS lead_report (
+                     id integer PRIMARY KEY,
+                     market varchar,
+                     prospect varchar,
+                     appt_date date,
+                     result varchar,
+                     set_date date,
+                     setter varchar,
+                     confirmer varchar,
+                     cnf_date date,
+                     source_sub varchar,
+                     job_type varchar,
+                     product varchar,
+                     sales_rep_1 varchar,
+                     sales_rep_2 varchar,
+                     address varchar, 
+                     city_state_zip varchar,
+                     validated_address varchar,
+                     validated_city varchar,
+                     validated_state varchar,
+                     validated_zip varchar,
+                     county varchar,
+                     latitude real,
+                     longitude real);''')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+def add_record(conn, record):
+    """Add a record to our lead_report database.
+
+    Args:
+        record: a dict containing fields to add to our database.
+    """
+    c = conn.cursor()
+    for v in get_data(filename):
+        conn.cursor().execute(
+	    'INSERT INTO lead_report VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+            v
+        )
+    conn.commit()
+
+def get_records_from_xls(workbook):
+    """Get records from a .xls file."""
+
+    def get_datetime(cell_value):
+        """Requires access to the workbook variable."""
+        if cell_value == '':
+            return None
+        else:
+            return datetime.datetime(
+                *xlrd.xldate_as_tuple(cell_value, workbook.datemode)
+            )
+
+    sheet = workbook.sheet_by_index(0)
+
+    records = []
+    r = 11
+    while r < sheet.nrows:
+        try:
+            while sheet.cell_type(r, 0) != xlrd.XL_CELL_NUMBER:
+                r += 1
+        except IndexError:
+            break
+        if r >= sheet.nrows:
+            break
+
+        record = {}
+        for field, rec in {
+            'leadperfection_id': { 'r_offset': 0, 'c': 0,  'cell_type': xlrd.XL_CELL_NUMBER },
+            'market':            { 'r_offset': 1, 'c': 0,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'prospect':          { 'r_offset': 0, 'c': 1,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'appt_date':         { 'r_offset': 0, 'c': 2,  'cell_type': xlrd.XL_CELL_DATE   },
+            'result':            { 'r_offset': 0, 'c': 5,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'set_date':          { 'r_offset': 0, 'c': 7,  'cell_type': xlrd.XL_CELL_DATE   },
+            'setter':            { 'r_offset': 0, 'c': 9,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'confirmer':         { 'r_offset': 1, 'c': 9,  'cell_type': xlrd.XL_CELL_TEXT   },
+            'cnf_date':          { 'r_offset': 0, 'c': 13, 'cell_type': xlrd.XL_CELL_DATE   },
+            'source_sub':        { 'r_offset': 0, 'c': 15, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'job_type':          { 'r_offset': 1, 'c': 15, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'product':           { 'r_offset': 0, 'c': 19, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'sales_rep_1':       { 'r_offset': 0, 'c': 20, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'sales_rep_2':       { 'r_offset': 1, 'c': 20, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'address_line_1':    { 'r_offset': 0, 'c': 23, 'cell_type': xlrd.XL_CELL_TEXT   },
+            'address_line_2':    { 'r_offset': 1, 'c': 23, 'cell_type': xlrd.XL_CELL_TEXT   }
+        }.items():
+            assert sheet.cell_type(r + rec['r_offset'], rec['c']) in (rec['cell_type'], xlrd.XL_CELL_EMPTY)
+            if rec['cell_type'] == xlrd.XL_CELL_DATE:
+                fun = get_datetime
+            elif rec['cell_type'] == xlrd.XL_CELL_NUMBER:
+                fun = int
+            elif rec['cell_type'] == xlrd.XL_CELL_TEXT:
+                fun = str
+            record[field] = fun(sheet.cell_value(r + rec['r_offset'], rec['c']))
+        records.append(record)
+        r += 2
+
+    return records
+
+
+def create_workbook(records):
+    """ Create an .xlsx Excel file with this data."""
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+
+    fields = ('leadperfection_id', 'market', 'prospect', 'appt_date', 'result',
+              'set_date', 'setter', 'confirmer', 'cnf_date', 'source_sub',
+              'job_type', 'product', 'sales_rep_1', 'sales_rep_2',
+              'address_line_1', 'address_line_2')
+
+    for c, field in enumerate(fields):
+        sheet.cell(row=1, column=c+1, value=field)
+
+    for r, record in enumerate(records):
+        for c, field in enumerate(fields):
+            sheet.cell(row=r+2, column=c+1, value=record[field])
+    return workbook
+
+def convert_datestring_to_timestamp(s):
+    """Convert a datestring to a timestamp.
+
+    Returns:
+       timestamp.
+    """
+    return datetime.datetime.strptime(s, '%m/%d/%Y').strftime('%Y-%m-%d')
+
+def get_geograhpic_data(address):
+    """Get geographic data for an address.
+
+    Returns:
+       a dict with entries for the county, state, latitude and longitude.
+    """
+
+    geolocator = Nominatim(timeout=30, user_agent="chesterfield_report")
+    location = geolocator.geocode(address)
+
+    if location == None or location.raw == None:
+        return {
+            'normalized_county': '',
+            'normalized_state': '',
+            'lat': '',
+            'lng': '',
+        }
+    else:
+        zipcode = ''
+        m = re.search('\d{5}(?!.*\d{5})', location.raw['display_name'])
+        try:
+            zipcode = m.group(0)
+        except AttributeError:
+            pass
+
+        county = ''
+        m = re.search('([^, ]+) County,(?!=.*County)', location.raw['display_name'])
+        try:
+            county = m.group(1)
+        except AttributeError:
+            pass
+
+        state = ''
+        m = re.search('County, ([^,]+)', location.raw['display_name'])
+        try:
+            state = m.group(1)
+        except AttributeError:
+            pass
+
+        return {
+            'normalized_county': county,
+            'normalized_state': state,
+            'lat': location.raw['lat'],
+            'lng': location.raw['lon']
+        }
+
+def add_validated_address(usps_user_id, street_address, city, state):
+    """
+    https://www.usps.com/business/web-tools-apis/address-information-api.pdf
+    Note that the documentation for the API is innacurate. See the XML Request
+    Example at 2.3.1.2. The terms of this API prohibit scraping for a database.
+    Be sure to allow time between requests. 
+
+    Usage:
+    correct_address_usps(
+        USER_ID,
+        '9218999 W 159th',
+        'Orland Park',
+        'IL'
+    )
+
+    Raises an AttibuteError if the address cannot be validated.
+    """
+
+    address_validate_request = ElementTree.fromstring('<AddressValidateRequest/>')
+    address_validate_request.set('USERID', usps_user_id)
+
+    ElementTree.SubElement(address_validate_request, 'Revision').text = '1'
+    address = ElementTree.SubElement(address_validate_request, 'Address')
+    address.set('ID', '0')
+
+    ElementTree.SubElement(address, 'Address1').text = street_address
+    ElementTree.SubElement(address, 'Address2').text = ''
+    ElementTree.SubElement(address, 'City').text = city
+    ElementTree.SubElement(address, 'State').text = state
+    ElementTree.SubElement(address, 'Zip5').text = ''
+    ElementTree.SubElement(address, 'Zip4').text = ''
+
+    params = {
+        'API': 'Verify',
+        'XML': ElementTree.tostring(address_validate_request).decode('utf-8')
+    }
+
+    response = urllib.request.urlopen(
+        "https://secure.shippingapis.com/ShippingAPI.dll?{}".format(
+            urllib.parse.urlencode(params)
+        )
+    )
+
+    address_validate_response = ElementTree.fromstring(
+        response.read().decode('utf-8')
+    )
+
+    return {
+        'street_address': address_validate_response.find('Address/Address2').text,
+        'city': address_validate_response.find('Address/City').text,
+        'state': address_validate_response.find('Address/State').text,
+    }
+
+def create_workbook(records):
+    """ Create an .xlsx Excel file with this data."""
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+
+    fields = ('leadperfection_id', 'market', 'prospect', 'appt_date', 'result',
+              'set_date', 'setter', 'confirmer', 'cnf_date', 'source_sub',
+              'job_type', 'product', 'sales_rep_1', 'sales_rep_2',
+              'address_line_1', 'address_line_2')
+
+    for c, field in enumerate(fields):
+        sheet.cell(row=1, column=c+1, value=field)
+
+    for r, record in enumerate(records):
+        for c, field in enumerate(fields):
+            sheet.cell(row=r+2, column=c+1, value=record[field])
+    return workbook
+
+
+if __name__=='__main__':
+    options = docopt(__doc__)
+    if options['--add-from-csv']:
+        # be sure that the function to add data doesn't add duplicate entries in the system.
+        raise NotImplementedError
+
+    elif options['--add-geo']:
+        records = get_records_from_csv(options['<input_csv_filename>'])
+
+        r = 0
+        while r < len(records):
+            records[r].update(
+                get_geo_data(records[r]['address_line_1'] + ' ' + records[r]['address_line_2'])
+            )
+            r += 1
+
+        writer = csv.writer(sys.stdout)
+        for r in records:
+            writer.writerow([
+                r['leadperfection_id'],
+                r['market'],
+                r['prospect'],
+                str(r['appt_date']).split(' ')[0],
+                r['result'],
+                str(r['set_date']).split(' ')[0],
+                r['setter'],
+                r['confirmer'],
+                str(r['cnf_date']).split(' ')[0],
+                r['source_sub'],
+                r['job_type'],
+                r['product'],
+                r['sales_rep_1'],
+                r['sales_rep_2'],
+                r['address_line_1'],
+                r['address_line_2'],
+                r['normalized_county'],
+                r['normalized_state'],
+                r['normalized_postalCode'],
+                r['lat'],
+                r['lng']
+            ])
+    elif options['--convert-to-csv']:
+        records = get_records_from_xlsx(
+            openpyxl.load_workbook(options['<input_xlsx_filename>'])
+        )
+
+        writer = csv.writer(sys.stdout)
+        for r in records:
+            writer.writerow([
+                r['leadperfection_id'],
+                r['market'],
+                r['prospect'],
+                str(r['appt_date']).split(' ')[0],
+                r['result'],
+                str(r['set_date']).split(' ')[0],
+                r['setter'],
+                r['confirmer'],
+                str(r['cnf_date']).split(' ')[0],
+                r['source_sub'],
+                r['job_type'],
+                r['product'],
+                r['sales_rep_1'],
+                r['sales_rep_2'],
+                r['address_line_1'],
+                r['address_line_2']
+            ])
+        sys.exit()
+    elif options['--convert-to-xlsx']:
+        create_workbook(
+            get_records(
+                xlrd.open_workbook(
+                    options['<input_xls_filename>'],
+                    logfile=sys.stderr
+                )
+            )
+        ).save(options['<output_xlsx_filename>'])
+        sys.exit()
+    elif options['--county-report']:
+        with open(options['<csv_filename>']) as f:
+            for row in csv.reader(f):
+                print('{} County, {}'.format(row[16], row[17]))
+
+    '''
+    create_workbook(
+        get_records(
+            xlrd.open_workbook(
+                options['<input_xls_filename>'],
+                logfile=sys.stderr
+            )
+        )
+    ).save(options['<output_xlsx_filename>'])
+    '''
+
+"""
+def retrieve(conn, month):
+    c = conn.cursor()
+    c.execute("SELECT * FROM leads WHERE set_date BETWEEN '{month}-01' AND '{month}-31';".format(month=month))
+    return c.fetchall()
+
+def get_records_from_csv(csv_filename):
+    '''This should be able to import either plain CSV data or CSV data with
+       geographic info in the rightmost columns.'''
+    records = []
+    with open(csv_filename) as f:
+        for row in csv.reader(f):
+            record = {
+                'leadperfection_id': row[0],
+                'market':            row[1],
+                'prospect':          row[2],
+                'appt_date':         row[3],
+                'result':            row[4],
+                'set_date':          row[5],
+                'setter':            row[6],
+                'confirmer':         row[7],
+                'cnf_date':          row[8],
+                'source_sub':        row[9],
+                'job_type':          row[10],
+                'product':           row[11],
+                'sales_rep_1':       row[12],
+                'sales_rep_2':       row[13],
+                'address_line_1':    row[14],
+                'address_line_2':    row[15]
+            }
+            if len(row) > 16:
+                record.update({
+                    'normalized_street_address': row[16],
+                    'normalized_city':           row[17],
+                    'normalized_state':          row[18],
+                    'normalized_postalCode':     row[19],
+                    'normalized_county':         row[20],
+                    'lat':                       row[21],
+                    'lng':                       row[22]
+                })
+            records.append(record)
+    return records
+
+def get_records_from_xlsx(workbook):
+    """Get records from an openpyxl workbook."""
+
+    def get_datetime(cell_value):
+        """Requires access to the workbook variable."""
+        if cell_value == '':
+            return None
+        else:
+            return datetime.datetime(
+                cell_value
+            )
+
+    sheet = workbook.active
+
+    max_cell = sheet.dimensions.split(':')[1]
+    max_row = int(''.join([i for i in max_cell if i.isnumeric()]))
+
+    records = []
+    r = 12
+    while r <= max_row:
+        try:
+            while type(sheet.cell(row=r, column=1).value) != int:
+                assert r <= max_row
+                r += 1
+        except (AssertionError, IndexError):
+            break
+
+        record = {}
+        for field, rec in {
+            'leadperfection_id': { 'r_offset': 0, 'c': 1,  'cell_type': 'int'  },
+            'market':            { 'r_offset': 1, 'c': 1,  'cell_type': 'str'  },
+            'prospect':          { 'r_offset': 0, 'c': 2,  'cell_type': 'str'  },
+            'appt_date':         { 'r_offset': 0, 'c': 3,  'cell_type': 'date' },
+            'result':            { 'r_offset': 0, 'c': 6,  'cell_type': 'str'  },
+            'set_date':          { 'r_offset': 0, 'c': 8,  'cell_type': 'date' },
+            'setter':            { 'r_offset': 0, 'c': 10,  'cell_type': 'str' },
+            'confirmer':         { 'r_offset': 1, 'c': 10,  'cell_type': 'str' },
+            'cnf_date':          { 'r_offset': 0, 'c': 14, 'cell_type': 'date' },
+            'source_sub':        { 'r_offset': 0, 'c': 16, 'cell_type': 'str'  },
+            'job_type':          { 'r_offset': 1, 'c': 16, 'cell_type': 'str'  },
+            'product':           { 'r_offset': 0, 'c': 20, 'cell_type': 'str'  },
+            'sales_rep_1':       { 'r_offset': 0, 'c': 21, 'cell_type': 'str'  },
+            'sales_rep_2':       { 'r_offset': 1, 'c': 21, 'cell_type': 'str'  },
+            'address_line_1':    { 'r_offset': 0, 'c': 24, 'cell_type': 'str'  },
+            'address_line_2':    { 'r_offset': 1, 'c': 24, 'cell_type': 'str'  }
+        }.items():
+            if rec['cell_type'] == 'date':
+                record[field] = sheet.cell(row = r + rec['r_offset'], column = rec['c']).value
+            elif rec['cell_type'] == 'int':
+                record[field] = int(sheet.cell(row = r + rec['r_offset'], column = rec['c']).value)
+            elif rec['cell_type'] == 'str':
+                record[field] = str(sheet.cell(row = r + rec['r_offset'], column = rec['c']).value)
+        records.append(record)
+        r += 2
+
+    return records
+
+def get_year_month(records):
+    """ Get the year and month from these records."""
+
+    dates = sorted(
+        [r['cnf_date'] for r in records if r['cnf_date'] is not None]
+    )
+    d = dates[int(len(dates) / 2)]
+    return (d.year, d.month)
+
+def get_lat_lng(address):
+    data = json.loads(
+        urllib.request.urlopen(
+            'http://open.mapquestapi.com/geocoding/v1/address?key={}&location={}'.format(
+                MAPQUEST_API_KEY,
+                urllib.parse.quote(address)
+            )
+        ).read()
+    )
+
+    for result in data['results']:
+        for location in result['locations']:
+            if location['adminArea3'] == '':
+                continue
+            return (
+                location['adminArea3'],
+                location['adminArea3Type'],
+                location['adminArea4'],
+                location['adminArea4Type'],
+                location['latLng']
+            )
+    return None
+
+
+"""
